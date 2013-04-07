@@ -150,6 +150,33 @@ function generateSourceFiles(sourceFiles) {
 }
 
 /**
+ * Look for classes or functions with the same name as modules (which indicates that the module
+ * exports only that class or function), then attach the classes or functions to the `module`
+ * property of the appropriate module doclets. The name of each class or function is also updated
+ * for display purposes. This function mutates the original arrays.
+ * 
+ * @private
+ * @param {Array.<module:jsdoc/doclet.Doclet>} doclets - The array of classes and functions to
+ * check.
+ * @param {Array.<module:jsdoc/doclet.Doclet>} modules - The array of module doclets to search.
+ */
+function attachModuleSymbols(doclets, modules) {
+    var symbols = {};
+
+    // build a lookup table
+    doclets.forEach(function(symbol) {
+        symbols[symbol.longname] = symbol;
+    });
+
+    return modules.map(function(module) {
+        if (symbols[module.longname]) {
+            module.module = symbols[module.longname];
+            module.module.name = module.module.name.replace('module:', 'require("') + '")';
+        }
+    });
+}
+
+/**
  * Create the navigation sidebar.
  * @param {object} members The members that will be used to create the sidebar.
  * @param {array<object>} members.classes
@@ -164,7 +191,9 @@ function generateSourceFiles(sourceFiles) {
  */
 function buildNav(members) {
     var nav = '<h2><a href="index.html">Index</a></h2>',
-        seen = {};
+        seen = {},
+        hasClassList = false,
+        classNav = '';
 
     if (members.modules.length) {
         nav += '<h3>Modules</h3><ul>';
@@ -191,25 +220,18 @@ function buildNav(members) {
     }
 
     if (members.classes.length) {
-        var moduleClasses = 0;
         members.classes.forEach(function(c) {
-            var moduleSameName = find({kind: 'module', longname: c.longname});
-            if (moduleSameName.length) {
-                c.name = c.name.replace('module:', 'require("')+'")';
-                moduleClasses++;
-                moduleSameName[0].module = c;
-            }
-            if (moduleClasses !== -1 && moduleClasses < members.classes.length) {
-                nav += '<h3>Classes</h3><ul>';
-                moduleClasses = -1;
-            }
             if ( !hasOwnProp.call(seen, c.longname) ) {
-                nav += '<li>'+linkto(c.longname, c.name)+'</li>';
+                classNav += '<li>'+linkto(c.longname, c.name)+'</li>';
             }
             seen[c.longname] = true;
         });
         
-        nav += '</ul>';
+        if (classNav !== '') {
+            nav += '<h3>Classes</h3><ul>';
+            nav += classNav;
+            nav += '</ul>';
+        }
     }
 
     if (members.events.length) {
@@ -303,6 +325,7 @@ exports.publish = function(taffyData, opts, tutorials) {
 
     data = helper.prune(data);
     data.sort('longname, version, since');
+    helper.addEventListeners(data);
 
     var sourceFiles = {};
     var sourceFilePaths = [];
@@ -424,6 +447,8 @@ exports.publish = function(taffyData, opts, tutorials) {
 
     // once for all
     view.nav = buildNav(members);
+    attachModuleSymbols( find({ kind: ['class', 'function'], longname: {left: 'module:'} }),
+        members.modules );
 
     // only output pretty-printed source files if requested; do this before generating any other
     // pages, so the other pages can link to the source files
